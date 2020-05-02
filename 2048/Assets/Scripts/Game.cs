@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using UnityEngine;
 using UnityEngine.UI;
@@ -15,21 +16,50 @@ public class Game : MonoBehaviour
 
     public static Transform[,] grid = new Transform[gridWidth,gridHeight];
 
+    public static NotATile[,] previousGrid = new NotATile[gridWidth,gridHeight];
+
+    public static NotATile[,] saveGrid = new NotATile[gridWidth, gridHeight];
+
     public Canvas gameOverCanvas;
 
     public Text gameScoreText;
+
+    public Text bestScoreText;
     
     public int score = 0;
+
+    private int previousScore = 0;
+
+    private int saveScore = 0;
 
     //public CFDebug debug;
 
     private int numberOfCoroutinesRunning = 0;
 
     private bool generatedNewTileThisTurn = true;
-    
+
+    // sound var
+
+    public AudioClip moveTilesSound;
+
+    public AudioClip mergeTilesSound;
+
+    private AudioSource audioSource;
+
+    bool madeFirstMove = false;
+
+    bool saveGame = false;
+
     void Start()
     {
+        //PlayerPrefs.SetInt("bestscore", 0);
+
         GenerateNewTile(2);
+
+        audioSource = transform.GetComponent<AudioSource>();
+
+        UpdateBestScore();
+        
     }
 
     void Update()
@@ -49,10 +79,11 @@ public class Game : MonoBehaviour
             }
             else
             {
+                SaveBestScore();
+                UpdateScore();
                 gameOverCanvas.gameObject.SetActive(true);
             }
         }
-        
         
 
         //debug.Add("Current Time", Time.time.ToString(), "currenttime");
@@ -64,6 +95,11 @@ public class Game : MonoBehaviour
         
         if(down || up || left || right)
         {
+            if (!madeFirstMove)
+                madeFirstMove = true;
+
+            StorePreviousTiles();
+
             PrepareTilesForMerging();
             if (down)
             {
@@ -95,9 +131,50 @@ public class Game : MonoBehaviour
         }
     }
 
+    private void StorePreviousTiles()
+    {
+        previousScore = score;
+
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                Transform tempTile = grid[x, y];
+
+                previousGrid[x, y] = null;
+
+                if(tempTile != null)
+                {
+                    NotATile notATile = new NotATile();
+
+                    notATile.location = tempTile.localPosition;
+                    notATile.value = tempTile.GetComponent<Tile>().tileValue;
+
+                    previousGrid[x, y] = notATile;
+
+                }
+                
+            }
+
+        }
+    }
+
     void UpdateScore()
     {
         gameScoreText.text = score.ToString("000000000");
+    }
+
+    void UpdateBestScore()
+    {
+        bestScoreText.text = PlayerPrefs.GetInt("bestscore").ToString();
+    }
+    void SaveBestScore()
+    {
+        int oldBestScore = PlayerPrefs.GetInt("bestscore");
+        if(score > oldBestScore)
+        {
+            PlayerPrefs.SetInt("bestscore", score);
+        }
     }
 
     bool CheckGameOver()
@@ -198,7 +275,12 @@ public class Game : MonoBehaviour
         }
 
         if (tilesMovedCount != 0)
+        {
             generatedNewTileThisTurn = false;
+
+            audioSource.PlayOneShot(moveTilesSound);
+        }
+            
 
         for(int y = 0; y < gridHeight; ++y)
         {
@@ -429,9 +511,108 @@ public class Game : MonoBehaviour
 
         UpdateScore();
 
+        UpdateBestScore();
+
         GenerateNewTile(2);
     }
 
+    public void Undo()
+    {
+        if(madeFirstMove == true)
+        {
+            score = previousScore;
+
+            UpdateScore();
+
+            foreach (Transform child in transform)
+            {
+                Destroy(child.gameObject);
+            }
+            for (int x = 0; x < gridWidth; x++)
+            {
+                for (int y = 0; y < gridHeight; y++)
+                {
+                    grid[x, y] = null;
+
+                    NotATile notATile = previousGrid[x, y];
+                    if (notATile != null)
+                    {
+                        int tileValue = notATile.value;
+                        string newTileName = "tile_" + tileValue;
+
+                        GameObject newTile = (GameObject)Instantiate(Resources.Load(newTileName, typeof(GameObject)), notATile.location, Quaternion.identity);
+
+                        newTile.transform.parent = transform;
+                        grid[x, y] = newTile.transform;
+                    }
+                }
+            }
+        }
+        
+    }
+    public void SaveGame()
+    {
+        saveGame = true;
+
+        saveScore = score;
+
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                saveGrid[x, y] = null;
+
+                if(grid[x,y] != null) {
+                    Transform t = grid[x, y];
+                    Vector2 location = t.localPosition;
+
+                    int value = t.GetComponent<Tile>().tileValue;
+
+                    NotATile notATile = new NotATile();
+
+                    notATile.location = location;
+
+                    notATile.value = value;
+
+                    saveGrid[x, y] = notATile;
+                }
+                
+            }
+        }
+    }
+
+    public void LoadGame()
+    {
+        if(saveGame == true)
+        {
+            score = saveScore;
+            UpdateScore();
+
+            foreach (Transform child in transform)
+            {
+                Destroy(child.gameObject);
+            }
+            for (int x = 0; x < gridWidth; x++)
+            {
+                for (int y = 0; y < gridHeight; y++)
+                {
+                    grid[x, y] = null;
+
+                    NotATile notATile = saveGrid[x, y];
+                    if (notATile != null)
+                    {
+                        int tileValue = notATile.value;
+                        string newTileName = "tile_" + tileValue;
+
+                        GameObject newTile = (GameObject)Instantiate(Resources.Load(newTileName, typeof(GameObject)), notATile.location, Quaternion.identity);
+
+                        newTile.transform.parent = transform;
+                        grid[x, y] = newTile.transform;
+                    }
+                }
+            }
+        }
+    }
     IEnumerator NewTilePopIn (GameObject tile, Vector2 initialScale, Vector2 finalScale, float timeScale, Vector2 initialPosition, Vector2 finalPosition)
     {
         numberOfCoroutinesRunning++;
@@ -480,6 +661,10 @@ public class Game : MonoBehaviour
             string newTileName = "tile_" + movingTileValue * 2;
 
             score += movingTileValue * 2;
+
+            UpdateScore();
+
+            audioSource.PlayOneShot(mergeTilesSound);
 
             GameObject newTile = (GameObject)Instantiate(Resources.Load(newTileName, typeof(GameObject)), tile.transform.localPosition, Quaternion.identity);
 
